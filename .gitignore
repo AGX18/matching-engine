@@ -1,0 +1,24 @@
+# Binaries for programs
+*.exe
+*.darwin
+*.linux
+*.windows
+
+# Dependency directories (remove the "!" to ignore vendor/ altogether)
+# vendor/
+
+# Test binary, generated with go test -c
+*.test
+
+# Output of the go build command
+# for packages not in the standard library
+# (e.g. your own project's binaries if built without a specific output name)
+[a-zA-Z0-9]*~
+
+# IDE specific files
+.idea/
+.vscode/
+
+# OS generated files
+.DS_Store
+Thumbs.db
