@@ -155,3 +155,91 @@ func (ob *OrderBook) removeAskPrice(p int64) {
 		ob.askPrices = append(ob.askPrices[:i], ob.askPrices[i+1:]...)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+// AddOrder places a resting limit order into the book.
+// Must only be called after matching has determined no immediate fill.
+func (ob *OrderBook) AddOrder(order *Order) error {
+	if order.Type == MarketOrder {
+		return fmt.Errorf("market orders cannot rest in the book")
+	}
+	if _, exists := ob.orderIndex[order.ID]; exists {
+		return fmt.Errorf("order %d already in book", order.ID)
+	}
+	ob.orderIndex[order.ID] = order
+
+	if order.Side == Buy {
+		if _, exists := ob.bids[order.Price]; !exists {
+			ob.bids[order.Price] = &PriceLevel{Price: order.Price}
+			ob.insertBidPrice(order.Price)
+		}
+		ob.bids[order.Price].push(order)
+	} else {
+		if _, exists := ob.asks[order.Price]; !exists {
+			ob.asks[order.Price] = &PriceLevel{Price: order.Price}
+			ob.insertAskPrice(order.Price)
+		}
+		ob.asks[order.Price].push(order)
+	}
+	return nil
+}
+
+// CancelOrder removes a resting order by its uint64 ID.
+// O(1): one map lookup + O(1) linked list removal.
+func (ob *OrderBook) CancelOrder(orderID uint64) (*Order, error) {
+	order, exists := ob.orderIndex[orderID]
+	if !exists {
+		return nil, fmt.Errorf("order %d not found", orderID)
+	}
+	if !order.IsActive() {
+		return nil, fmt.Errorf("order %d is not active (status: %d)", orderID, order.Status)
+	}
+
+	delete(ob.orderIndex, orderID)
+	ob.cancelFromLevel(order) // sets Status = StatusCancelled internally
+	return order, nil
+}
+
+// cancelFromLevel calls level.cancel and cleans up the price level if empty.
+func (ob *OrderBook) cancelFromLevel(order *Order) {
+	if order.Side == Buy {
+		level, ok := ob.bids[order.Price]
+		if !ok {
+			return
+		}
+		level.cancel(order) // owns total, Status, detach, size
+		if level.isEmpty() {
+			delete(ob.bids, order.Price)
+			ob.removeBidPrice(order.Price)
+		}
+	} else {
+		level, ok := ob.asks[order.Price]
+		if !ok {
+			return
+		}
+		level.cancel(order)
+		if level.isEmpty() {
+			delete(ob.asks, order.Price)
+			ob.removeAskPrice(order.Price)
+		}
+	}
+}
+
+// BestBid returns the highest resting buy price, or 0 if empty.
+func (ob *OrderBook) BestBid() int64 {
+	if len(ob.bidPrices) == 0 {
+		return 0
+	}
+	return ob.bidPrices[0]
+}
+
+// BestAsk returns the lowest resting sell price, or 0 if empty.
+func (ob *OrderBook) BestAsk() int64 {
+	if len(ob.askPrices) == 0 {
+		return 0
+	}
+	return ob.askPrices[0]
+}
