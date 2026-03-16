@@ -243,3 +243,38 @@ func (ob *OrderBook) BestAsk() int64 {
 	}
 	return ob.askPrices[0]
 }
+
+// ---------------------------------------------------------------------------
+// Snapshot (for REST / WebSocket responses)
+// ---------------------------------------------------------------------------
+
+type PriceLevelSnapshot struct {
+	Price    int64 `json:"price"`
+	Quantity int64 `json:"quantity"`
+	Orders   int   `json:"orders"`
+}
+
+func (ob *OrderBook) BidLevels(depth int) []PriceLevelSnapshot {
+	return ob.snapshot(ob.bidPrices, ob.bids, depth)
+}
+
+func (ob *OrderBook) AskLevels(depth int) []PriceLevelSnapshot {
+	return ob.snapshot(ob.askPrices, ob.asks, depth)
+}
+
+func (ob *OrderBook) snapshot(prices []int64, levels map[int64]*PriceLevel, depth int) []PriceLevelSnapshot {
+	if depth <= 0 || depth > len(prices) {
+		depth = len(prices)
+	}
+	result := make([]PriceLevelSnapshot, 0, depth)
+	for i := 0; i < depth; i++ {
+		p := prices[i]
+		lvl := levels[p]
+		result = append(result, PriceLevelSnapshot{
+			Price:    p,
+			Quantity: lvl.total,
+			Orders:   lvl.size,
+		})
+	}
+	return result
+}
