@@ -14,6 +14,7 @@ package orderbook
 
 import (
 	"fmt"
+	"sort"
 )
 
 // ---------------------------------------------------------------------------
@@ -92,4 +93,65 @@ func (pl *PriceLevel) cancel(o *Order) {
 
 func (pl *PriceLevel) isEmpty() bool {
 	return pl.head == nil
+}
+
+// ---------------------------------------------------------------------------
+// OrderBook
+// ---------------------------------------------------------------------------
+
+type OrderBook struct {
+	Symbol string
+
+	// bids: price → PriceLevel, prices kept sorted descending (best bid first)
+	bids      map[int64]*PriceLevel
+	bidPrices []int64
+
+	// asks: price → PriceLevel, prices kept sorted ascending (best ask first)
+	asks      map[int64]*PriceLevel
+	askPrices []int64
+
+	// orderIndex: O(1) lookup by ID for cancellations.
+	// Key is uint64 — hashed as a single integer, not a byte-by-byte string scan.
+	orderIndex map[uint64]*Order
+}
+
+func NewOrderBook(symbol string) *OrderBook {
+	return &OrderBook{
+		Symbol:     symbol,
+		bids:       make(map[int64]*PriceLevel),
+		asks:       make(map[int64]*PriceLevel),
+		orderIndex: make(map[uint64]*Order),
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Sorted price list helpers
+// ---------------------------------------------------------------------------
+
+func (ob *OrderBook) insertBidPrice(p int64) {
+	i := sort.Search(len(ob.bidPrices), func(i int) bool { return ob.bidPrices[i] <= p })
+	ob.bidPrices = append(ob.bidPrices, 0)
+	copy(ob.bidPrices[i+1:], ob.bidPrices[i:])
+	ob.bidPrices[i] = p
+}
+
+func (ob *OrderBook) insertAskPrice(p int64) {
+	i := sort.Search(len(ob.askPrices), func(i int) bool { return ob.askPrices[i] >= p })
+	ob.askPrices = append(ob.askPrices, 0)
+	copy(ob.askPrices[i+1:], ob.askPrices[i:])
+	ob.askPrices[i] = p
+}
+
+func (ob *OrderBook) removeBidPrice(p int64) {
+	i := sort.Search(len(ob.bidPrices), func(i int) bool { return ob.bidPrices[i] <= p })
+	if i < len(ob.bidPrices) && ob.bidPrices[i] == p {
+		ob.bidPrices = append(ob.bidPrices[:i], ob.bidPrices[i+1:]...)
+	}
+}
+
+func (ob *OrderBook) removeAskPrice(p int64) {
+	i := sort.Search(len(ob.askPrices), func(i int) bool { return ob.askPrices[i] >= p })
+	if i < len(ob.askPrices) && ob.askPrices[i] == p {
+		ob.askPrices = append(ob.askPrices[:i], ob.askPrices[i+1:]...)
+	}
 }
