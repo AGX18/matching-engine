@@ -1,5 +1,3 @@
-// internal/orderbook/doc.go
-
 // Package orderbook implements the core Limit Order Book (LOB) for a single
 // trading pair.
 //

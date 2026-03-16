@@ -1,5 +1,3 @@
-// internal/orderbook/book.go
-//
 // The Limit Order Book (LOB).
 //
 // Data structures:

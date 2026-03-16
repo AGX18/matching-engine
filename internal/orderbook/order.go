@@ -1,5 +1,3 @@
-// internal/orderbook/order.go
-//
 // Core domain types. These are the atoms of the entire system.
 // Using int64 for price/quantity avoids floating-point non-determinism —
 // critical for a matching engine that must produce identical output
