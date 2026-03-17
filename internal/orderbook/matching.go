@@ -1,0 +1,159 @@
+// Matching algorithm — Price-Time Priority.
+//
+// Rules:
+//   1. A buy  matches if bestAsk <= buy.Price  (or it is a market order).
+//   2. A sell matches if bestBid >= sell.Price (or it is a market order).
+//   3. Within a price level, the earliest-arriving order is matched first (FIFO).
+//   4. Trades execute at the RESTING order's price (maker price).
+//
+// Not goroutine-safe — called exclusively from the engine goroutine.
+
+package orderbook
+
+import (
+	"fmt"
+	"time"
+)
+
+// Match attempts to fill the incoming order against resting orders.
+// Returns all trades generated. Mutates the incoming order in place.
+func (ob *OrderBook) Match(incoming *Order) ([]*Trade, error) {
+	if incoming.Side == Buy {
+		return ob.matchBuy(incoming)
+	}
+	return ob.matchSell(incoming)
+}
+
+func (ob *OrderBook) matchBuy(buy *Order) ([]*Trade, error) {
+	var trades []*Trade
+
+	// Loop until the buy is filled or there are no more asks to match against.
+	for buy.Remaining() > 0 && len(ob.askPrices) > 0 {
+		bestAsk := ob.askPrices[0]
+
+		// For limit orders, if the best ask is above the buy price, we can't match.
+		if buy.Type == LimitOrder && bestAsk > buy.Price {
+			break
+		}
+
+		level := ob.asks[bestAsk]
+		trades = append(trades, ob.fillLevel(buy, level, bestAsk)...)
+
+		if level.isEmpty() {
+			delete(ob.asks, bestAsk)
+			ob.askPrices = ob.askPrices[1:]
+		}
+	}
+
+	ob.finalizeStatus(buy)
+	return trades, nil
+}
+
+func (ob *OrderBook) matchSell(sell *Order) ([]*Trade, error) {
+	var trades []*Trade
+
+	for sell.Remaining() > 0 && len(ob.bidPrices) > 0 {
+		bestBid := ob.bidPrices[0]
+
+		if sell.Type == LimitOrder && bestBid < sell.Price {
+			break
+		}
+
+		level := ob.bids[bestBid]
+		trades = append(trades, ob.fillLevel(sell, level, bestBid)...)
+
+		if level.isEmpty() {
+			delete(ob.bids, bestBid)
+			ob.bidPrices = ob.bidPrices[1:]
+		}
+	}
+
+	ob.finalizeStatus(sell)
+	return trades, nil
+}
+
+// fillLevel walks the FIFO queue at one price level, generating trades until
+// the aggressor is filled or the level is exhausted.
+//
+// level.fill owns all resting order side effects: Filled, Status, total, size,
+// and detachment from the list. matching.go only manages the aggressor and
+// the orderIndex cleanup for fully consumed resting orders.
+func (ob *OrderBook) fillLevel(aggressor *Order, level *PriceLevel, execPrice int64) []*Trade {
+	var trades []*Trade
+
+	for aggressor.Remaining() > 0 && !level.isEmpty() {
+		resting := level.head
+		fillQty := min64(aggressor.Remaining(), resting.Remaining())
+
+		trade := &Trade{
+			ID:        NewID(),
+			Price:     execPrice,
+			Quantity:  fillQty,
+			Timestamp: time.Now().UnixNano(),
+		}
+		if aggressor.Side == Buy {
+			trade.BuyOrderID = aggressor.ID
+			trade.SellOrderID = resting.ID
+		} else {
+			trade.BuyOrderID = resting.ID
+			trade.SellOrderID = aggressor.ID
+		}
+
+		level.fill(resting, fillQty) // owns: resting.Filled, Status, total, size, detach
+		aggressor.Filled += fillQty
+
+		if resting.Status == StatusFilled {
+			delete(ob.orderIndex, resting.ID)
+		}
+
+		trades = append(trades, trade)
+	}
+
+	return trades
+}
+
+// finalizeStatus sets the status on the incoming (aggressor) order after
+// the matching pass. Does not add to book — PlaceOrder handles that.
+func (ob *OrderBook) finalizeStatus(o *Order) {
+	switch {
+	case o.Remaining() == 0:
+		o.Status = StatusFilled
+	case o.Filled > 0:
+		o.Status = StatusPartial
+	default:
+		o.Status = StatusOpen
+	}
+}
+
+// PlaceOrder is the top-level entry point called by the engine.
+// Runs matching, then rests any unfilled limit quantity in the book.
+func (ob *OrderBook) PlaceOrder(order *Order) ([]*Trade, error) {
+	if order.Quantity <= 0 {
+		return nil, fmt.Errorf("quantity must be positive")
+	}
+	if order.Type == LimitOrder && order.Price <= 0 {
+		return nil, fmt.Errorf("limit price must be positive")
+	}
+
+	trades, err := ob.Match(order)
+	if err != nil {
+		return nil, err
+	}
+
+	// Unfilled limit orders rest in the book.
+	// Market orders are discarded if unfilled — they never rest.
+	if order.Type == LimitOrder && order.Remaining() > 0 {
+		if err := ob.AddOrder(order); err != nil {
+			return trades, err
+		}
+	}
+
+	return trades, nil
+}
+
+func min64(a, b int64) int64 {
+	if a < b {
+		return a
+	}
+	return b
+}
