@@ -73,15 +73,20 @@ func NewID() uint64 {
 		seq := current & 0xFFF
 
 		// 2. Get current time
-		nowMs := uint64(time.Now().UnixMilli() - snowflakeEpoch)
+		nowMs := time.Now().UnixMilli() - snowflakeEpoch
 
 		// 3. Evaluate the new state
-		if nowMs < lastMs {
-			// Clock moved backwards (NTP sync). Spin until it catches up.
+		if nowMs < 0 {
+			// Clock is set before our epoch (2024-01-01).
+			// This should never happen in production but could occur in misconfigured
+			// environments or tests. Treat it the same as clock regression.
+			runtime.Gosched()
 			continue
 		}
 
-		if nowMs == lastMs {
+		ms := uint64(nowMs) // safe — nowMs is guaranteed >= 0 here
+
+		if ms == lastMs {
 			// Same millisecond: increment sequence
 			seq = (seq + 1) & 0xFFF
 			if seq == 0 {
@@ -96,14 +101,14 @@ func NewID() uint64 {
 		}
 
 		// 4. Pack the proposed next state
-		nextState := (nowMs << 12) | seq
+		nextState := (ms << 12) | seq
 
 		// 5. Attempt to commit the new state atomically.
 		// If 'state' still equals 'current', it sets it to 'nextState' and returns true.
 		// If another goroutine altered 'state' in the meantime, it returns false.
 		if state.CompareAndSwap(current, nextState) {
 			// Success! Pack it into your specific [41 ms][12 seq][11 unused] format
-			return (nowMs << 22) | seq
+			return (ms << 22) | seq
 
 			// TODO: Add a 10-bit Node/Machine ID for distributed scaling.
 			// Currently, this assumes a single-node engine. If multiple API servers
