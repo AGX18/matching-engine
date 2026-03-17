@@ -41,7 +41,7 @@ func (ob *OrderBook) matchBuy(buy *Order) ([]*Trade, error) {
 
 		if level.isEmpty() {
 			delete(ob.asks, bestAsk)
-			ob.askPrices = ob.askPrices[1:]
+			ob.removeAskPrice(bestAsk)
 		}
 	}
 
@@ -64,7 +64,7 @@ func (ob *OrderBook) matchSell(sell *Order) ([]*Trade, error) {
 
 		if level.isEmpty() {
 			delete(ob.bids, bestBid)
-			ob.bidPrices = ob.bidPrices[1:]
+			ob.removeBidPrice(bestBid)
 		}
 	}
 
