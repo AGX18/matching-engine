@@ -139,6 +139,13 @@ func (ob *OrderBook) PlaceOrder(order *Order) ([]*Trade, error) {
 	// order. Avoids a time.Now() system call on every iteration of fillLevel.
 	now := time.Now().UnixNano()
 
+	// TODO: CQRS — separate the write path (matching) from the read path
+	// (order status queries). The matching engine should publish trade events and order status changes as immutable messages
+	// to an event stream. A separate query service maintains the order history and serves GET /orders/{id}
+	// without touching this path. This gives us a clean separation of concerns,
+	// better read performance, and a complete audit log of all state changes.
+	// and serves GET /orders/{id} without touching this path.
+
 	trades, err := ob.Match(order, now)
 	if err != nil {
 		return nil, err
