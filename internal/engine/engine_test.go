@@ -1,9 +1,9 @@
-package engine
-
 // Tests for the engine layer.
 // These test the channel mechanics, sequential processing guarantee,
 // and concurrent safety — not the matching logic itself (that lives
 // in the orderbook package tests).
+
+package engine
 
 import (
 	"sync"
@@ -22,7 +22,7 @@ func startEngine(t *testing.T) (*Engine, func()) {
 	t.Helper()
 	eng := New("BTC/USD", 256, 512)
 	go eng.Run()
-	return eng, func() { eng.Shutdown() }
+	return eng, func() { eng.Close() }
 }
 
 func sendPlace(t *testing.T, eng *Engine, order *orderbook.Order) orderbook.CommandResult {
@@ -286,22 +286,22 @@ func TestEngine_SequentialProcessing_OrdersProcessedInOrder(t *testing.T) {
 // Shutdown
 // ---------------------------------------------------------------------------
 
-func TestEngine_Shutdown_ClosesEventChannel(t *testing.T) {
+func TestEngine_Close_ClosesEventChannel(t *testing.T) {
 	eng := New("BTC/USD", 256, 512)
 	go eng.Run()
 
-	eng.Shutdown()
+	// Close() closes commandCh. Run() drains it then closes eventCh.
+	eng.Close()
 
-	// Event channel should be closed after shutdown.
-	// Reading from a closed channel returns the zero value immediately.
+	// Event channel should be closed after the engine drains and exits.
 	timeout := time.After(1 * time.Second)
 	select {
 	case _, ok := <-eng.Events():
 		if ok {
-			t.Error("expected event channel to be closed after shutdown")
+			t.Error("expected event channel to be closed after Close()")
 		}
 	case <-timeout:
-		t.Fatal("timed out waiting for event channel to close")
+		t.Fatal("timed out waiting for event channel to close after Close()")
 	}
 }
 

@@ -46,7 +46,6 @@ type Engine struct {
 	book      *orderbook.OrderBook
 	commandCh chan orderbook.Command // incoming commands from API handlers
 	eventCh   chan TradeEvent        // outgoing events to WebSocket broadcaster
-	done      chan struct{}          // signals shutdown
 }
 
 // New creates an Engine for the given symbol.
@@ -57,7 +56,6 @@ func New(symbol string, commandBuf, eventBuf int) *Engine {
 		book:      orderbook.NewOrderBook(symbol),
 		commandCh: make(chan orderbook.Command, commandBuf),
 		eventCh:   make(chan TradeEvent, eventBuf),
-		done:      make(chan struct{}),
 	}
 }
 
@@ -77,9 +75,16 @@ func (e *Engine) CommandCh() chan<- orderbook.Command {
 	return e.commandCh
 }
 
-// Shutdown signals the engine loop to stop.
-func (e *Engine) Shutdown() {
-	close(e.done)
+// Close shuts down the engine by closing the command channel.
+// The Run() loop drains any buffered commands then exits cleanly.
+//
+// IMPORTANT: the HTTP server must be fully shut down before calling Close()
+// to ensure no handler is mid-flight trying to send to commandCh.
+// Sending to a closed channel panics — the correct shutdown sequence is:
+//  1. srv.Shutdown(ctx)  — drain all in-flight HTTP handlers
+//  2. eng.Close()        — only then close the engine
+func (e *Engine) Close() {
+	close(e.commandCh)
 }
 
 func (e EventType) MarshalJSON() ([]byte, error) {
@@ -107,21 +112,20 @@ func (e EventType) String() string {
 // Run starts the sequential processing loop. Call this in a dedicated goroutine.
 // It processes one command at a time — this is intentional and is the source
 // of our determinism guarantee.
+//
+// The loop exits when commandCh is closed (via Close()) and fully drained.
+// This guarantees every in-flight command is processed before shutdown.
 func (e *Engine) Run() {
 	log.Printf("[engine] started for symbol %s", e.book.Symbol)
-	for {
-		select {
-		case <-e.done:
-			log.Printf("[engine] shutting down")
-			close(e.eventCh)
-			return
 
-		case cmd := <-e.commandCh:
-			result := e.process(cmd)
-			// Send result back to the waiting API handler.
-			cmd.ResultCh <- result
-		}
+	for cmd := range e.commandCh {
+		result := e.process(cmd)
+		cmd.ResultCh <- result
 	}
+
+	// commandCh is closed and drained — safe to close eventCh now.
+	log.Printf("[engine] shutting down")
+	close(e.eventCh)
 }
 
 // process dispatches a single command. Called only from the engine goroutine.
