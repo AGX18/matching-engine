@@ -13,6 +13,8 @@ package engine
 
 import (
 	"fmt"
+	"log"
+	"time"
 
 	"github.com/agx18/matching-engine/internal/orderbook"
 )
@@ -99,5 +101,107 @@ func (e EventType) String() string {
 		return "BOOK_UPDATE"
 	default:
 		return fmt.Sprintf("UNKNOWN(%d)", e)
+	}
+}
+
+// Run starts the sequential processing loop. Call this in a dedicated goroutine.
+// It processes one command at a time — this is intentional and is the source
+// of our determinism guarantee.
+func (e *Engine) Run() {
+	log.Printf("[engine] started for symbol %s", e.book.Symbol)
+	for {
+		select {
+		case <-e.done:
+			log.Printf("[engine] shutting down")
+			close(e.eventCh)
+			return
+
+		case cmd := <-e.commandCh:
+			result := e.process(cmd)
+			// Send result back to the waiting API handler.
+			cmd.ResultCh <- result
+		}
+	}
+}
+
+// process dispatches a single command. Called only from the engine goroutine.
+func (e *Engine) process(cmd orderbook.Command) orderbook.CommandResult {
+	switch cmd.Type {
+
+	case orderbook.CmdPlaceOrder:
+		return e.processPlace(cmd.Order)
+
+	case orderbook.CmdCancelOrder:
+		return e.processCancel(cmd.OrderID)
+
+	default:
+		return orderbook.CommandResult{Err: fmt.Errorf("unknown command type: %d", cmd.Type)}
+	}
+}
+
+func (e *Engine) processPlace(order *orderbook.Order) orderbook.CommandResult {
+	if order.ID == 0 {
+		order.ID = orderbook.NewID()
+	}
+	if order.Timestamp == 0 {
+		order.Timestamp = time.Now().UnixNano()
+	}
+
+	trades, err := e.book.PlaceOrder(order)
+	if err != nil {
+		return orderbook.CommandResult{Err: err}
+	}
+
+	// Broadcast each individual trade as a separate event.
+	for _, t := range trades {
+		e.emit(TradeEvent{
+			Type:      EventTrade,
+			Trade:     t,
+			Timestamp: t.Timestamp,
+		})
+	}
+
+	e.emit(TradeEvent{
+		Type:      EventBookUpdate,
+		Timestamp: time.Now().UnixNano(),
+		BookUpdate: &BookUpdateEvent{
+			Symbol: e.book.Symbol,
+			Bids:   e.book.BidLevels(5),
+			Asks:   e.book.AskLevels(5),
+		},
+	})
+
+	return orderbook.CommandResult{
+		Trades:  trades,
+		OrderID: order.ID,
+	}
+}
+
+func (e *Engine) processCancel(orderID uint64) orderbook.CommandResult {
+	order, err := e.book.CancelOrder(orderID)
+	if err != nil {
+		return orderbook.CommandResult{Err: err}
+	}
+
+	e.emit(TradeEvent{
+		Type:      EventBookUpdate,
+		Timestamp: time.Now().UnixNano(),
+		BookUpdate: &BookUpdateEvent{
+			Symbol: e.book.Symbol,
+			Bids:   e.book.BidLevels(5),
+			Asks:   e.book.AskLevels(5),
+		},
+	})
+
+	return orderbook.CommandResult{OrderID: order.ID}
+}
+
+// emit sends an event to the broadcast channel. Non-blocking — if the
+// broadcaster is slow, events are dropped (market data is best-effort).
+func (e *Engine) emit(event TradeEvent) {
+	select {
+	case e.eventCh <- event:
+	default:
+		log.Printf("[engine] WARNING: event channel full, dropping %s event", event.Type)
 	}
 }
