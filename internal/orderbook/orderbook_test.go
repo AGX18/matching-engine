@@ -35,10 +35,6 @@ func newBuyMarket(id uint64, qty int64) *Order {
 	return newOrder(id, Buy, MarketOrder, 0, qty)
 }
 
-func newSellMarket(id uint64, qty int64) *Order {
-	return newOrder(id, Sell, MarketOrder, 0, qty)
-}
-
 func newBook() *OrderBook {
 	return NewOrderBook("BTC/USD")
 }
