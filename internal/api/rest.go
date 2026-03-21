@@ -208,13 +208,15 @@ func (h *Handler) GetBook(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) sendCommand(r *http.Request, cmd orderbook.Command) orderbook.CommandResult {
 	cmd.ResultCh = make(chan orderbook.CommandResult, 1)
 
-	// Send the command — may block briefly if commandCh buffer is full (backpressure).
+	timer := time.NewTimer(engineTimeout)
+	defer timer.Stop() // ← always stops and frees the timer immediately
+
 	select {
 	case h.engineCh <- cmd:
 		// command accepted — now wait for the result
 	case <-r.Context().Done():
 		return orderbook.CommandResult{Err: fmt.Errorf("request cancelled before engine accepted command")}
-	case <-time.After(engineTimeout):
+	case <-timer.C:
 		return orderbook.CommandResult{Err: fmt.Errorf("engine timeout: command queue full")}
 	}
 
@@ -224,7 +226,7 @@ func (h *Handler) sendCommand(r *http.Request, cmd orderbook.Command) orderbook.
 		return result
 	case <-r.Context().Done():
 		return orderbook.CommandResult{Err: fmt.Errorf("request cancelled or timed out")}
-	case <-time.After(engineTimeout):
+	case <-timer.C:
 		return orderbook.CommandResult{Err: fmt.Errorf("engine timeout: no response")}
 	}
 }
