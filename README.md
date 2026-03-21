@@ -2,7 +2,7 @@
 
 A deterministic, low-latency Limit Order Book (LOB) and matching engine written in Go.
 
-This project is designed with a strict focus on hardware mechanical sympathy, zero-allocation hot paths, and lock-free concurrency to guarantee deterministic Price-Time Priority execution.
+This project is designed with a strict focus on hardware mechanical sympathy, zero-allocation hot paths, and lock-free concurrency to guarantee deterministic Price-Time Priority execution. It includes a fully functional REST API for order ingestion and a real-time WebSocket broadcaster for market data.
 
 ## 🚀 Architecture & Key Design Decisions
 
@@ -39,7 +39,13 @@ Floating-point math (`float64`) introduces hardware-level non-determinism (IEEE 
 ## 📂 Project Structure
 
 ```text
+├── cmd/
+│   └── server/
+│       └── main.go        # Entry point, graceful shutdown orchestration
 ├── internal/
+│   ├── api/
+│   │   ├── rest.go        # HTTP REST endpoints (ingestion)
+│   │   └── websocket.go   # WebSocket broadcaster (fan-out)
 │   ├── orderbook/
 │   │   ├── order.go       # Core domain structs (Order, Trade, IDs)
 │   │   ├── book.go        # Limit Order Book and intrusive linked list
@@ -47,14 +53,27 @@ Floating-point math (`float64`) introduces hardware-level non-determinism (IEEE 
 │   │   └── book_test.go   # Deterministic state-machine tests
 │   └── engine/
 │       └── engine.go      # CSP event loop, Command routing, Event emitting
+│       └── engine_test.go # tests for the matching engine
 └── README.md
+
 ```
 
 ## 🛠️ Getting Started
 
 ### Prerequisites
 
-* Go 1.21+
+* Go 1.22+ (Uses the new enhanced routing multiplexer)
+
+### Running the Server
+
+Bash
+
+```bash
+go run cmd/server/main.go
+
+```
+
+The server will start on port `8080` (or the port specified by the `LISTEN_ADDR` environment variable).
 
 ### Running the Tests
 
@@ -62,6 +81,55 @@ Floating-point math (`float64`) introduces hardware-level non-determinism (IEEE 
 go test -v ./internal/orderbook
 go test -v -race ./internal/engine
 ```
+
+## 📡 API Reference
+
+### REST Endpoints
+
+#### **1. Place an Order**
+
+Bash
+
+```bash
+curl -X POST http://localhost:8080/orders \
+-H "Content-Type: application/json" \
+-d '{
+  "side": "BUY",
+  "type": "LIMIT",
+  "price": 60000000000,
+  "quantity": 1500000,
+  "client_id": 1
+}'
+
+```
+
+#### **2. Get Order Book Snapshot**
+
+Bash
+
+```bash
+curl http://localhost:8080/book?depth=10
+
+```
+
+#### **3. Cancel an Order**
+
+Bash
+
+```bash
+curl -X DELETE http://localhost:8080/orders/{order_id}
+
+```
+
+### WebSocket Feed
+
+Connect to the real-time market data feed:
+
+```bash
+ws://localhost:8080/ws
+```
+
+The feed streams JSON events for every execution (`TRADE`) and book mutation (`BOOK_UPDATE`).
 
 ## 🔮 Roadmap / Future Work
 
