@@ -11,12 +11,25 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/agx18/matching-engine/internal/engine"
 	"github.com/agx18/matching-engine/internal/orderbook"
+)
+
+const (
+	// maxRequestBodyBytes caps incoming JSON payloads at 1MB.
+	// Prevents a malicious client from sending a multi-GB body and forcing
+	// the server to allocate unbounded RAM — a trivial OOM attack vector.
+	maxRequestBodyBytes = 1 << 20 // 1MB
+
+	// engineTimeout is how long a handler will wait for the engine to respond
+	// before returning 503. Protects against engine stalls exhausting all
+	// HTTP goroutines and file descriptors.
+	engineTimeout = 2 * time.Second
 )
 
 // Handler holds dependencies for all REST handlers.
@@ -62,6 +75,9 @@ type ErrorResponse struct {
 
 // PlaceOrder handles POST /orders
 func (h *Handler) PlaceOrder(w http.ResponseWriter, r *http.Request) {
+	// Cap the request body to prevent OOM from malicious oversized payloads.
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+
 	var req PlaceOrderRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		jsonError(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
@@ -97,7 +113,7 @@ func (h *Handler) PlaceOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result := h.sendCommand(orderbook.Command{
+	result := h.sendCommand(r, orderbook.Command{
 		Type:  orderbook.CmdPlaceOrder,
 		Order: order,
 	})
@@ -134,7 +150,7 @@ func (h *Handler) CancelOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result := h.sendCommand(orderbook.Command{
+	result := h.sendCommand(r, orderbook.Command{
 		Type:    orderbook.CmdCancelOrder,
 		OrderID: orderID,
 	})
@@ -163,7 +179,7 @@ func (h *Handler) GetBook(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	result := h.sendCommand(orderbook.Command{
+	result := h.sendCommand(r, orderbook.Command{
 		Type:  orderbook.CmdGetBook,
 		Depth: depth,
 	})
@@ -177,13 +193,40 @@ func (h *Handler) GetBook(w http.ResponseWriter, r *http.Request) {
 
 // ---- Internal helpers ----
 
-// sendCommand dispatches a command to the engine and waits for a response.
-// Each call creates a fresh ResultCh so concurrent API requests don't
-// interfere with each other's responses.
-func (h *Handler) sendCommand(cmd orderbook.Command) orderbook.CommandResult {
+// sendCommand dispatches a command to the engine and waits for the result.
+// It respects two cancellation signals:
+//
+//  1. r.Context().Done() — the client dropped the connection. No point waiting
+//     for a result nobody will receive.
+//
+//  2. engineTimeout — the engine is stalled or backed up. Return 503 rather
+//     than holding the HTTP goroutine (and its file descriptor) indefinitely.
+//
+// Note: if the context fires after the command was already sent, the engine
+// will still process it — we just don't wait for the result. This is
+// acceptable; the order may rest in the book even if the client timed out.
+func (h *Handler) sendCommand(r *http.Request, cmd orderbook.Command) orderbook.CommandResult {
 	cmd.ResultCh = make(chan orderbook.CommandResult, 1)
-	h.engineCh <- cmd
-	return <-cmd.ResultCh
+
+	// Send the command — may block briefly if commandCh buffer is full (backpressure).
+	select {
+	case h.engineCh <- cmd:
+		// command accepted — now wait for the result
+	case <-r.Context().Done():
+		return orderbook.CommandResult{Err: fmt.Errorf("request cancelled before engine accepted command")}
+	case <-time.After(engineTimeout):
+		return orderbook.CommandResult{Err: fmt.Errorf("engine timeout: command queue full")}
+	}
+
+	// Wait for the engine to process and reply.
+	select {
+	case result := <-cmd.ResultCh:
+		return result
+	case <-r.Context().Done():
+		return orderbook.CommandResult{Err: fmt.Errorf("request cancelled or timed out")}
+	case <-time.After(engineTimeout):
+		return orderbook.CommandResult{Err: fmt.Errorf("engine timeout: no response")}
+	}
 }
 
 func jsonOK(w http.ResponseWriter, payload any) {
