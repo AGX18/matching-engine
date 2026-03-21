@@ -12,6 +12,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -35,8 +36,7 @@ const (
 // Handler holds dependencies for all REST handlers.
 type Handler struct {
 	engineCh chan<- orderbook.Command
-	eng      *engine.Engine       // needed for book snapshot endpoint
-	book     *orderbook.OrderBook // read-only snapshot access
+	eng      *engine.Engine // needed for book snapshot endpoint
 }
 
 // NewHandler constructs the REST handler.
@@ -234,13 +234,17 @@ func (h *Handler) sendCommand(r *http.Request, cmd orderbook.Command) orderbook.
 func jsonOK(w http.ResponseWriter, payload any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(payload)
+	if err := json.NewEncoder(w).Encode(payload); err != nil {
+		log.Printf("[api] failed to write response: %v", err)
+	}
 }
 
 func jsonError(w http.ResponseWriter, msg string, code int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(ErrorResponse{Error: msg})
+	if err := json.NewEncoder(w).Encode(ErrorResponse{Error: msg}); err != nil {
+		log.Printf("[api] failed to write error response: %v", err)
+	}
 }
 
 func tradeMessage(n int) string {
