@@ -138,6 +138,9 @@ func (e *Engine) process(cmd orderbook.Command) orderbook.CommandResult {
 	case orderbook.CmdCancelOrder:
 		return e.processCancel(cmd.OrderID)
 
+	case orderbook.CmdGetBook:
+		return e.processGetBook(cmd.Depth)
+
 	default:
 		return orderbook.CommandResult{Err: fmt.Errorf("unknown command type: %d", cmd.Type)}
 	}
@@ -198,6 +201,19 @@ func (e *Engine) processCancel(orderID uint64) orderbook.CommandResult {
 	})
 
 	return orderbook.CommandResult{OrderID: order.ID}
+}
+
+func (e *Engine) processGetBook(depth int) orderbook.CommandResult {
+	if depth <= 0 {
+		depth = 10 // sensible default
+	}
+	return orderbook.CommandResult{
+		BookSnapshot: &orderbook.BookSnapshot{
+			Symbol: e.book.Symbol,
+			Bids:   e.book.BidLevels(depth),
+			Asks:   e.book.AskLevels(depth),
+		},
+	}
 }
 
 // emit sends an event to the broadcast channel. Non-blocking — if the

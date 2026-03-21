@@ -151,6 +151,30 @@ func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, map[string]string{"status": "ok", "ts": strconv.FormatInt(time.Now().UnixNano(), 10)})
 }
 
+// GetBook handles GET /book?depth=N
+// Returns a snapshot of the top N price levels on each side.
+// depth defaults to 10 if not specified or invalid.
+// The snapshot is taken inside the engine goroutine — safe, no data race.
+func (h *Handler) GetBook(w http.ResponseWriter, r *http.Request) {
+	depth := 10
+	if d := r.URL.Query().Get("depth"); d != "" {
+		if parsed, err := strconv.Atoi(d); err == nil && parsed > 0 {
+			depth = parsed
+		}
+	}
+
+	result := h.sendCommand(orderbook.Command{
+		Type:  orderbook.CmdGetBook,
+		Depth: depth,
+	})
+	if result.Err != nil {
+		jsonError(w, result.Err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	jsonOK(w, result.BookSnapshot)
+}
+
 // ---- Internal helpers ----
 
 // sendCommand dispatches a command to the engine and waits for a response.

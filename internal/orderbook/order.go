@@ -15,8 +15,8 @@ import (
 type Side int8
 
 const (
-	Buy  Side = 0
-	Sell Side = 1
+	Buy Side = iota
+	Sell
 )
 
 func (s Side) String() string {
@@ -31,9 +31,9 @@ type OrderType int8
 
 const (
 	// LimitOrder rests in the book if it cannot be immediately matched.
-	LimitOrder OrderType = 0
+	LimitOrder OrderType = iota
 	// MarketOrder executes immediately at best available price; never rests.
-	MarketOrder OrderType = 1
+	MarketOrder
 )
 
 // OrderStatus tracks the lifecycle of an order.
@@ -184,8 +184,9 @@ type Trade struct {
 type CommandType int8
 
 const (
-	CmdPlaceOrder  CommandType = 0
-	CmdCancelOrder CommandType = 1
+	CmdPlaceOrder CommandType = iota
+	CmdCancelOrder
+	CmdGetBook
 )
 
 // Command is the single type flowing through the engine's command channel.
@@ -196,14 +197,22 @@ type Command struct {
 	Order    *Order // set for CmdPlaceOrder
 	ResultCh chan CommandResult
 	OrderID  uint64 // set for CmdCancelOrder
+	Depth    int    // set for CmdGetBook — how many price levels to return
 	Type     CommandType
+}
+
+type BookSnapshot struct {
+	Symbol string
+	Bids   []PriceLevelSnapshot
+	Asks   []PriceLevelSnapshot
 }
 
 // CommandResult carries the outcome back to the waiting API handler.
 // Each handler creates its own ResultCh so concurrent HTTP requests
 // never see each other's responses.
 type CommandResult struct {
-	Trades  []*Trade
-	OrderID uint64 // echoed back for client confirmation
-	Err     error
+	Trades       []*Trade
+	OrderID      uint64        // echoed back for client confirmation
+	BookSnapshot *BookSnapshot // set for CmdGetBook
+	Err          error
 }
