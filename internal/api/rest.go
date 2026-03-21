@@ -17,7 +17,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/agx18/matching-engine/internal/engine"
 	"github.com/agx18/matching-engine/internal/orderbook"
 )
 
@@ -36,12 +35,11 @@ const (
 // Handler holds dependencies for all REST handlers.
 type Handler struct {
 	engineCh chan<- orderbook.Command
-	eng      *engine.Engine // needed for book snapshot endpoint
 }
 
 // NewHandler constructs the REST handler.
-func NewHandler(eng *engine.Engine, cmdCh chan<- orderbook.Command) *Handler {
-	return &Handler{engineCh: cmdCh, eng: eng}
+func NewHandler(cmdCh chan<- orderbook.Command) *Handler {
+	return &Handler{engineCh: cmdCh}
 }
 
 // RegisterRoutes wires up all routes on the given router.

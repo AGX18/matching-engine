@@ -39,7 +39,7 @@ func main() {
 	bcast := api.NewBroadcaster(eng.Events())
 
 	// REST handler sends to the engine's write-only command channel.
-	restHandler := api.NewHandler(eng, eng.CommandCh())
+	restHandler := api.NewHandler(eng.CommandCh())
 
 	// Start background goroutines.
 	go eng.Run()
