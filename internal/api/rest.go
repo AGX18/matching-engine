@@ -49,6 +49,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /orders", h.PlaceOrder)
 	mux.HandleFunc("DELETE /orders/{id}", h.CancelOrder)
 	mux.HandleFunc("GET /health", h.Health)
+	mux.HandleFunc("GET /book", h.GetBook)
 }
 
 // ---- Request / Response types ----
