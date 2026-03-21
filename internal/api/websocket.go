@@ -12,7 +12,6 @@ package api
 import (
 	"log"
 	"net/http"
-	"sync"
 
 	"github.com/agx18/matching-engine/internal/engine"
 	"github.com/gorilla/websocket"
@@ -33,10 +32,8 @@ type client struct {
 
 // Broadcaster fans out TradeEvents from the engine to all connected clients.
 type Broadcaster struct {
-	eventCh <-chan engine.TradeEvent
-	clients map[*client]struct{}
-	mu      sync.RWMutex
-
+	eventCh    <-chan engine.TradeEvent
+	clients    map[*client]struct{}
 	register   chan *client
 	unregister chan *client
 }
