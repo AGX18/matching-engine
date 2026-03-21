@@ -36,7 +36,7 @@ func main() {
 	eng := engine.New(symbol, 256, 512)
 
 	// Broadcaster reads from the engine's read-only event channel.
-	bcast := api.New(eng.Events())
+	bcast := api.NewBroadcaster(eng.Events())
 
 	// REST handler sends to the engine's write-only command channel.
 	restHandler := api.NewHandler(eng, eng.CommandCh())

@@ -39,7 +39,7 @@ type Broadcaster struct {
 }
 
 // New creates a Broadcaster that reads from the engine's event channel.
-func New(eventCh <-chan engine.TradeEvent) *Broadcaster {
+func NewBroadcaster(eventCh <-chan engine.TradeEvent) *Broadcaster {
 	return &Broadcaster{
 		eventCh:    eventCh,
 		clients:    make(map[*client]struct{}),
